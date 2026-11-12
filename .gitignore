@@ -18,6 +18,8 @@ dist-ssr/
 .packages
 *.apk
 *.aab
+!releases/*.apk
+!web-dashboard/public/*.apk
 
 # OS / IDE
 .DS_Store
