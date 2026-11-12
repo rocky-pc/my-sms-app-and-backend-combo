@@ -7,6 +7,22 @@ import '../models/sms_model.dart';
 import 'auth_service.dart';
 import 'native_bridge.dart';
 
+class SyncResult {
+  final bool success;
+  final String message;
+  final int synced;
+  final int failed;
+  final int pending;
+
+  SyncResult({
+    required this.success,
+    required this.message,
+    this.synced = 0,
+    this.failed = 0,
+    this.pending = 0,
+  });
+}
+
 class SyncService extends ChangeNotifier {
   static final SyncService _instance = SyncService._internal();
   factory SyncService() => _instance;
@@ -46,8 +62,12 @@ class SyncService extends ChangeNotifier {
     }
 
     // Check initial connectivity
-    final connectivityResult = await Connectivity().checkConnectivity();
-    _isOnline = !connectivityResult.contains(ConnectivityResult.none);
+    try {
+      final connectivityResult = await Connectivity().checkConnectivity();
+      _isOnline = !connectivityResult.contains(ConnectivityResult.none);
+    } catch (_) {
+      _isOnline = true;
+    }
 
     // Listen to network changes
     _connectivitySubscription =
@@ -111,25 +131,62 @@ class SyncService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> syncNow() async {
-    if (_isSyncing) return false;
+  Future<SyncResult> syncNow() async {
+    if (_isSyncing) {
+      return SyncResult(
+        success: false,
+        message: 'A synchronization is already in progress.',
+      );
+    }
     _isSyncing = true;
     notifyListeners();
 
     int synced = 0;
     int failed = 0;
+    String? errorMessage;
 
     try {
       if (!_auth.isAuthenticated) {
-        _isSyncing = false;
-        notifyListeners();
-        return false;
+        return SyncResult(
+          success: false,
+          message: 'Please log in to synchronize messages.',
+        );
       }
 
       final user = _auth.currentUser!;
+
+      // Ensure device registration is active
+      if (_auth.deviceId == null) {
+        await _auth.registerDeviceAgain();
+      }
+
       final pendingList = await NativeBridge.getLocalMessages(limit: 100);
       final pendingToUpload =
           pendingList.where((m) => m.syncStatus == 'PENDING').toList();
+
+      if (pendingToUpload.isEmpty) {
+        _lastSyncTime = DateTime.now();
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt(
+            'last_successful_sync_epoch', _lastSyncTime!.millisecondsSinceEpoch);
+
+        if (_auth.deviceId != null) {
+          try {
+            await _auth.client.from('devices').update({
+              'last_sync_at': _lastSyncTime!.toUtc().toIso8601String(),
+            }).eq('id', _auth.deviceId!);
+          } catch (_) {}
+        }
+
+        // Trigger native worker so WorkManager is synchronized
+        await NativeBridge.triggerSyncNow();
+
+        return SyncResult(
+          success: true,
+          message: 'All messages are up to date (0 pending).',
+          pending: 0,
+        );
+      }
 
       for (final msg in pendingToUpload) {
         try {
@@ -155,6 +212,7 @@ class SyncService extends ChangeNotifier {
           synced++;
         } catch (e) {
           debugPrint('Upload failure for hash ${msg.messageHash}: $e');
+          errorMessage = e.toString().replaceAll('PostgrestException', '').replaceAll('Exception: ', '').trim();
           failed++;
         }
       }
@@ -162,7 +220,7 @@ class SyncService extends ChangeNotifier {
       // Also trigger native WorkManager so OS handles any missed items
       await NativeBridge.triggerSyncNow();
 
-      if (synced > 0 || (failed == 0 && pendingToUpload.isEmpty)) {
+      if (synced > 0) {
         _lastSyncTime = DateTime.now();
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt(
@@ -178,29 +236,44 @@ class SyncService extends ChangeNotifier {
         }
 
         // Record sync log
-        if (synced > 0 || failed > 0) {
-          try {
-            await _auth.client.from('sync_logs').insert({
-              'user_id': user.id,
-              if (_auth.deviceId != null) 'device_id': _auth.deviceId,
-              'sync_status': failed == 0
-                  ? 'SUCCESS'
-                  : (synced > 0 ? 'PARTIAL' : 'FAILED'),
-              'synced_count': synced,
-              'failed_count': failed,
-            });
-          } catch (_) {}
-        }
+        try {
+          await _auth.client.from('sync_logs').insert({
+            'user_id': user.id,
+            if (_auth.deviceId != null) 'device_id': _auth.deviceId,
+            'sync_status': failed == 0 ? 'SUCCESS' : 'PARTIAL',
+            'synced_count': synced,
+            'failed_count': failed,
+          });
+        } catch (_) {}
+
+        return SyncResult(
+          success: true,
+          message: failed == 0
+              ? 'Successfully synced $synced message(s)!'
+              : 'Synced $synced message(s), $failed failed.',
+          synced: synced,
+          failed: failed,
+        );
+      } else {
+        return SyncResult(
+          success: false,
+          message: errorMessage != null
+              ? 'Sync failed: $errorMessage'
+              : 'Sync failed: check network connection',
+          failed: failed,
+        );
       }
     } catch (e) {
       debugPrint('SyncNow error: $e');
+      return SyncResult(
+        success: false,
+        message: 'Sync error: ${e.toString().replaceAll('Exception: ', '')}',
+      );
     } finally {
       _isSyncing = false;
       await refreshDashboardStats();
       notifyListeners();
     }
-
-    return synced > 0 || failed == 0;
   }
 
   @override

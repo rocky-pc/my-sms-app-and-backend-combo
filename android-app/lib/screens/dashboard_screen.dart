@@ -5,6 +5,7 @@ import '../services/auth_service.dart';
 import '../services/sync_service.dart';
 import 'settings_screen.dart';
 import 'sync_status_screen.dart';
+import 'login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -36,15 +37,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _handleSyncNow() async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
-    final success = await _syncService.syncNow();
+    final result = await _syncService.syncNow();
     if (mounted) {
       scaffoldMessenger.showSnackBar(
         SnackBar(
-          content: Text(
-            success ? 'Sync completed successfully' : 'Sync failed or no network',
-          ),
-          backgroundColor: success ? Colors.green : Colors.red,
-          duration: const Duration(seconds: 2),
+          content: Text(result.message),
+          backgroundColor: result.success
+              ? (result.pending == 0 && result.synced == 0
+                  ? Colors.blueGrey[800]
+                  : Colors.green[700])
+              : Colors.red[700],
+          duration: const Duration(seconds: 3),
         ),
       );
     }
@@ -122,6 +125,46 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (!_auth.isAuthenticated)
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade100,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.amber.shade800),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, color: Colors.amber.shade900),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Session not active. Please sign in.',
+                        style: TextStyle(
+                          color: Colors.amber.shade900,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.amber.shade800,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      ),
+                      onPressed: () {
+                        Navigator.of(context).pushReplacement(
+                          MaterialPageRoute(builder: (_) => const LoginScreen()),
+                        );
+                      },
+                      child: const Text('Log In', style: TextStyle(fontSize: 12)),
+                    ),
+                  ],
+                ),
+              ),
+
             // User & Device Banner
             Container(
               padding: const EdgeInsets.all(16),

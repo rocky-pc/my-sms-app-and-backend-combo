@@ -52,6 +52,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!mounted) return;
 
+      if (!auth.isAuthenticated) {
+        throw Exception('Authentication session not established. Please sign in with your email and password.');
+      }
+
       final smsGranted = await Permission.sms.isGranted;
       if (!mounted) return;
       if (!smsGranted) {

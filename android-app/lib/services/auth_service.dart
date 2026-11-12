@@ -91,8 +91,24 @@ class AuthService extends ChangeNotifier {
       email: email.trim(),
       password: password,
     );
+
     if (response.session != null) {
       await _registerDeviceAndSyncCredentials(response.session!);
+    } else {
+      // In Supabase, if email confirmation is required, signUp doesn't return a session.
+      // But our PostgreSQL trigger auto-confirms the email immediately.
+      // Sign in immediately with the credentials to establish the authenticated session.
+      try {
+        final signInResponse = await client.auth.signInWithPassword(
+          email: email.trim(),
+          password: password,
+        );
+        if (signInResponse.session != null) {
+          await _registerDeviceAndSyncCredentials(signInResponse.session!);
+        }
+      } catch (e) {
+        debugPrint('Auto sign-in after sign-up error: $e');
+      }
     }
     notifyListeners();
   }
@@ -100,7 +116,16 @@ class AuthService extends ChangeNotifier {
   Future<void> signOut() async {
     await client.auth.signOut();
     await NativeBridge.clearCredentials();
+    _deviceId = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('saved_device_id');
     notifyListeners();
+  }
+
+  Future<void> registerDeviceAgain() async {
+    if (isAuthenticated && client.auth.currentSession != null) {
+      await _registerDeviceAndSyncCredentials(client.auth.currentSession!);
+    }
   }
 
   Future<void> _registerDeviceAndSyncCredentials(Session session) async {
@@ -122,15 +147,28 @@ class AuthService extends ChangeNotifier {
             onConflict: 'user_id,installation_id',
           )
           .select('id')
-          .single();
+          .maybeSingle();
 
-      _deviceId = response['id']?.toString();
-      final prefs = await SharedPreferences.getInstance();
-      if (_deviceId != null) {
+      if (response != null && response['id'] != null) {
+        _deviceId = response['id'].toString();
+        final prefs = await SharedPreferences.getInstance();
         await prefs.setString('saved_device_id', _deviceId!);
       }
     } catch (e) {
       debugPrint('Device registration error: $e');
+      try {
+        final existing = await client
+            .from('devices')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('installation_id', installId)
+            .maybeSingle();
+        if (existing != null && existing['id'] != null) {
+          _deviceId = existing['id'].toString();
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('saved_device_id', _deviceId!);
+        }
+      } catch (_) {}
     }
 
     await _syncNativeCredentials(session);
