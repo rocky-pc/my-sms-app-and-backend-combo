@@ -20,6 +20,10 @@ const TAB_TITLES: Record<NavTab, { title: string; subtitle: string }> = {
     title: 'All SMS Messages',
     subtitle: 'Search, filter, view and manage your synchronized personal SMS',
   },
+  'bank-accounts': {
+    title: 'Bank Accounts',
+    subtitle: 'Track Indian Bank and Airtel Payments Bank transactions parsed from your SMS alerts',
+  },
   devices: {
     title: 'Devices & Synchronization',
     subtitle: 'Manage registered Android devices and inspect cloud sync logs',
