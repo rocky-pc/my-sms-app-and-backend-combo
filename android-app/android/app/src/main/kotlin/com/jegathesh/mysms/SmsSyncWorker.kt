@@ -7,10 +7,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
@@ -57,6 +54,7 @@ class SmsSyncWorker(
             return@withContext Result.failure()
         }
 
+        var activeToken: String = accessToken
         var syncedCount = 0
         var failedCount = 0
         var isTokenExpired = false
@@ -83,7 +81,7 @@ class SmsSyncWorker(
             var responseCode = postToSupabase(
                 endpoint = "$supabaseUrl/rest/v1/sms_messages",
                 anonKey = supabaseAnonKey,
-                token = accessToken,
+                token = activeToken,
                 body = jsonPayload.toString()
             )
 
@@ -91,12 +89,12 @@ class SmsSyncWorker(
             if (responseCode == 401 && !refreshToken.isNullOrEmpty() && !isTokenExpired) {
                 val newAccessToken = refreshAuthToken(supabaseUrl, supabaseAnonKey, refreshToken, prefs)
                 if (newAccessToken != null) {
-                    accessToken = newAccessToken
+                    activeToken = newAccessToken
                     // Retry with new token
                     responseCode = postToSupabase(
                         endpoint = "$supabaseUrl/rest/v1/sms_messages",
                         anonKey = supabaseAnonKey,
-                        token = accessToken,
+                        token = activeToken,
                         body = jsonPayload.toString()
                     )
                 } else {
@@ -116,11 +114,11 @@ class SmsSyncWorker(
 
         // Update device last_sync_at if deviceId is present
         if (!deviceId.isNullOrEmpty() && syncedCount > 0) {
-            updateDeviceLastSync(supabaseUrl, supabaseAnonKey, accessToken, deviceId)
+            updateDeviceLastSync(supabaseUrl, supabaseAnonKey, activeToken, deviceId)
         }
 
         // Log sync activity
-        recordSyncLog(supabaseUrl, supabaseAnonKey, accessToken, userId, deviceId, syncedCount, failedCount)
+        recordSyncLog(supabaseUrl, supabaseAnonKey, activeToken, userId, deviceId, syncedCount, failedCount)
 
         // Notify Flutter UI
         MainActivity.notifySyncCompleted(syncedCount, failedCount)
@@ -133,11 +131,11 @@ class SmsSyncWorker(
     }
 
     private fun containsSensitiveData(body: String): Boolean {
-        val lower = body.toLowerCase(Locale.ROOT)
+        val lower = body.lowercase(Locale.ROOT)
         return SENSITIVE_KEYWORDS.any { lower.contains(it) }
     }
 
-    private fun redactSensitiveData(body: String): Boolean {
+    private fun redactSensitiveData(body: String): String {
         // Redacts 4-8 digit numeric codes often present in OTPs
         return body.replace(Regex("\\b\\d{4,8}\\b"), "[REDACTED OTP]")
     }
