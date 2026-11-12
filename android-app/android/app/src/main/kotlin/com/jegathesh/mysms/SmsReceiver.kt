@@ -130,7 +130,7 @@ class SmsReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun uploadDirect(
+    private suspend fun uploadDirect(
         context: Context,
         sender: String,
         body: String,
@@ -139,67 +139,15 @@ class SmsReceiver : BroadcastReceiver() {
         hash: String,
         dbHelper: SmsDatabaseHelper
     ) {
-        val prefs = context.getSharedPreferences(SmsSyncWorker.PREFS_NAME, Context.MODE_PRIVATE)
-        val supabaseUrl = prefs.getString("supabase_url", null)
-        val supabaseAnonKey = prefs.getString("supabase_anon_key", null)
-        val accessToken = prefs.getString("access_token", null)
-        val userId = prefs.getString("user_id", null)
-        val deviceId = prefs.getString("device_id", null)
-        val filterSensitive = prefs.getBoolean("filter_sensitive", false)
-
-        if (supabaseUrl.isNullOrEmpty() || supabaseAnonKey.isNullOrEmpty() || accessToken.isNullOrEmpty() || userId.isNullOrEmpty()) {
-            return
-        }
-
-        var bodyToSync = body
-        if (filterSensitive && SmsSyncWorker.SENSITIVE_KEYWORDS.any { body.lowercase(Locale.ROOT).contains(it) }) {
-            bodyToSync = body.replace(Regex("\\b\\d{4,8}\\b"), "[REDACTED OTP]")
-        }
-
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }
-        val isoDate = sdf.format(Date(receivedAt))
-
-        val json = JSONObject().apply {
-            put("user_id", userId)
-            if (!deviceId.isNullOrEmpty()) put("device_id", deviceId)
-            put("sender", sender)
-            put("message_body", bodyToSync)
-            put("received_at", isoDate)
-            put("sim_slot", simSlot)
-            put("message_hash", hash)
-        }
-
-        try {
-            val url = URL("$supabaseUrl/rest/v1/sms_messages")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("apikey", supabaseAnonKey)
-                setRequestProperty("Authorization", "Bearer $accessToken")
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Prefer", "resolution=merge-duplicates")
-                doOutput = true
-                connectTimeout = 7000
-                readTimeout = 7000
-            }
-
-            OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use {
-                it.write(json.toString())
-                it.flush()
-            }
-
-            val code = conn.responseCode
-            conn.disconnect()
-
-            if (code in 200..299) {
-                Log.i(TAG, "Instant broadcast sync SUCCESS (HTTP $code) for $hash")
-                dbHelper.markAsSynced(hash)
-                MainActivity.notifySyncCompleted(1, 0)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Direct broadcast upload error (WorkManager will retry): ${e.message}")
-        }
+        SupabaseSyncHelper.uploadSms(
+            context = context,
+            sender = sender,
+            body = body,
+            receivedAt = receivedAt,
+            simSlot = simSlot,
+            hash = hash,
+            dbHelper = dbHelper
+        )
     }
 
     private fun extractSimSlot(context: Context, intent: Intent): String {

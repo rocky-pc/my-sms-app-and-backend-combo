@@ -167,4 +167,24 @@ class NativeBridge {
       return false;
     }
   }
+
+  static Future<bool> isNotificationListenerEnabled() async {
+    try {
+      final bool? res =
+          await _channel.invokeMethod('isNotificationListenerEnabled');
+      return res ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  static Future<bool> openNotificationListenerSettings() async {
+    try {
+      final bool? res =
+          await _channel.invokeMethod('openNotificationListenerSettings');
+      return res ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
 }

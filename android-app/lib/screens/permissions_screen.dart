@@ -11,17 +11,33 @@ class PermissionsScreen extends StatefulWidget {
   State<PermissionsScreen> createState() => _PermissionsScreenState();
 }
 
-class _PermissionsScreenState extends State<PermissionsScreen> {
+class _PermissionsScreenState extends State<PermissionsScreen>
+    with WidgetsBindingObserver {
   bool _smsGranted = false;
   bool _phoneStateGranted = false;
   bool _notificationGranted = false;
   bool _batteryOptimizationIgnored = false;
+  bool _notifListenerGranted = false;
   bool _checking = true;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _refreshPermissions();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshPermissions();
+    }
   }
 
   Future<void> _refreshPermissions() async {
@@ -31,6 +47,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     final phone = await Permission.phone.isGranted;
     final notif = await Permission.notification.isGranted;
     final battery = await NativeBridge.isIgnoringBatteryOptimizations();
+    final notifListener = await NativeBridge.isNotificationListenerEnabled();
 
     if (mounted) {
       setState(() {
@@ -38,9 +55,14 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
         _phoneStateGranted = phone;
         _notificationGranted = notif;
         _batteryOptimizationIgnored = battery;
+        _notifListenerGranted = notifListener;
         _checking = false;
       });
     }
+  }
+
+  Future<void> _requestNotificationListener() async {
+    await NativeBridge.openNotificationListenerSettings();
   }
 
   Future<void> _requestSms() async {
@@ -53,10 +75,58 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
       await NativeBridge.startForegroundSync();
       await NativeBridge.catchUpRecentSms();
       SyncService().syncNow();
+    } else {
+      // If permission is not granted (e.g. Android 13/14 Restricted Settings)
+      if (mounted) {
+        _showRestrictedSettingsGuide(context);
+      }
     }
-    if (status.isPermanentlyDenied) {
-      await openAppSettings();
-    }
+  }
+
+  void _showRestrictedSettingsGuide(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.lock_open_rounded, color: Colors.blueAccent, size: 40),
+        title: const Text('Allow Restricted Permission', textAlign: TextAlign.center),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Text(
+                'On Android 13, 14, and 15, sideloaded apps require one-time approval in phone settings:',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              SizedBox(height: 12),
+              Text('1. Tap "Open App Settings" below.'),
+              SizedBox(height: 4),
+              Text('2. Tap the 3 dots (⋮) in the top-right corner of App Info.'),
+              SizedBox(height: 4),
+              Text('3. Tap "Allow restricted settings".'),
+              SizedBox(height: 4),
+              Text('4. Confirm with your PIN or fingerprint.'),
+              SizedBox(height: 4),
+              Text('5. Go to Permissions → SMS → Select "Allow".'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              openAppSettings();
+            },
+            icon: const Icon(Icons.settings),
+            label: const Text('Open App Settings'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _requestPhoneState() async {
@@ -160,7 +230,48 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
                   isGranted: _notificationGranted,
                   onRequest: _requestNotification,
                 ),
+                const SizedBox(height: 12),
+
+                // Notification Access for RCS and Person-to-Person messages
+                _buildPermissionCard(
+                  icon: Icons.mark_chat_unread_rounded,
+                  title: 'Notification Access (RCS & Personal SMS)',
+                  subtitle:
+                      'Required to capture Google Messages RCS chats, personal messages, and notification alerts.',
+                  isGranted: _notifListenerGranted,
+                  onRequest: _requestNotificationListener,
+                ),
                 const SizedBox(height: 32),
+
+                if (!_smsGranted)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.blue.withOpacity(0.2)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline, color: Colors.blueAccent),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Android 13/14 restricted access? Tap the 3 dots (⋮) in App Settings to allow.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: theme.colorScheme.onSurface,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => _showRestrictedSettingsGuide(context),
+                          child: const Text('Guide', style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ),
 
                 ElevatedButton(
                   onPressed: _smsGranted

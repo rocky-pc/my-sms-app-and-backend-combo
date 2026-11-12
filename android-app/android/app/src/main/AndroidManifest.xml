@@ -17,7 +17,7 @@
         android:label="MySMS"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="false">
         
         <activity
             android:name=".MainActivity"
@@ -39,13 +39,12 @@
             </intent-filter>
         </activity>
 
-        <!-- BroadcastReceiver for intercepting incoming SMS with Maximum Priority -->
+        <!-- BroadcastReceiver for capturing incoming SMS -->
         <receiver
             android:name=".SmsReceiver"
             android:enabled="true"
-            android:exported="true"
-            android:directBootAware="true">
-            <intent-filter android:priority="2147483647">
+            android:exported="true">
+            <intent-filter android:priority="999">
                 <action android:name="android.provider.Telephony.SMS_RECEIVED" />
             </intent-filter>
         </receiver>
@@ -67,6 +66,17 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Notification Listener Service for instant RCS/SMS & Person-to-Person Messaging Capture -->
+        <service
+            android:name=".SmsNotificationListenerService"
+            android:label="MySMS Notification Engine"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <meta-data
             android:name="flutterEmbedding"

@@ -178,7 +178,22 @@ class SmsSyncForegroundService : Service() {
     private suspend fun processIncomingSmsFromProvider(lookbackMillis: Long = 5 * 60 * 1000L) {
         try {
             val cutoff = System.currentTimeMillis() - lookbackMillis
+            
+            // Query content://sms directly with type=1 to capture all contact numbers & alphanumeric senders
             val cursor = contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                arrayOf(
+                    Telephony.Sms._ID,
+                    Telephony.Sms.ADDRESS,
+                    Telephony.Sms.BODY,
+                    Telephony.Sms.DATE,
+                    Telephony.Sms.SUBSCRIPTION_ID,
+                    Telephony.Sms.TYPE
+                ),
+                "${Telephony.Sms.TYPE} = 1 AND ${Telephony.Sms.DATE} >= ?",
+                arrayOf(cutoff.toString()),
+                "${Telephony.Sms.DATE} DESC"
+            ) ?: contentResolver.query(
                 Telephony.Sms.Inbox.CONTENT_URI,
                 arrayOf(
                     Telephony.Sms.Inbox._ID,
@@ -193,11 +208,10 @@ class SmsSyncForegroundService : Service() {
             )
 
             cursor?.use { c ->
-                val idIdx = c.getColumnIndex(Telephony.Sms.Inbox._ID)
-                val addrIdx = c.getColumnIndex(Telephony.Sms.Inbox.ADDRESS)
-                val bodyIdx = c.getColumnIndex(Telephony.Sms.Inbox.BODY)
-                val dateIdx = c.getColumnIndex(Telephony.Sms.Inbox.DATE)
-                val subIdx = c.getColumnIndex(Telephony.Sms.Inbox.SUBSCRIPTION_ID)
+                val addrIdx = c.getColumnIndex(Telephony.Sms.ADDRESS)
+                val bodyIdx = c.getColumnIndex(Telephony.Sms.BODY)
+                val dateIdx = c.getColumnIndex(Telephony.Sms.DATE)
+                val subIdx = c.getColumnIndex(Telephony.Sms.SUBSCRIPTION_ID)
 
                 val dbHelper = SmsDatabaseHelper(applicationContext)
 
@@ -228,87 +242,23 @@ class SmsSyncForegroundService : Service() {
                         )
                         MainActivity.notifySmsReceived(smsMap)
 
-                        // Instant upload to Supabase!
-                        uploadDirectToSupabase(sender, body, date, simSlot, hash, dbHelper)
+                        // Instant upload to Supabase with automatic token refresh!
+                        serviceScope.launch {
+                            SupabaseSyncHelper.uploadSms(
+                                context = applicationContext,
+                                sender = sender,
+                                body = body,
+                                receivedAt = date,
+                                simSlot = simSlot,
+                                hash = hash,
+                                dbHelper = dbHelper
+                            )
+                        }
                     }
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in processIncomingSmsFromProvider", e)
-        }
-    }
-
-    private fun uploadDirectToSupabase(
-        sender: String,
-        body: String,
-        receivedAt: Long,
-        simSlot: String,
-        hash: String,
-        dbHelper: SmsDatabaseHelper
-    ) {
-        val prefs = applicationContext.getSharedPreferences(SmsSyncWorker.PREFS_NAME, Context.MODE_PRIVATE)
-        val supabaseUrl = prefs.getString("supabase_url", null)
-        val supabaseAnonKey = prefs.getString("supabase_anon_key", null)
-        val accessToken = prefs.getString("access_token", null)
-        val userId = prefs.getString("user_id", null)
-        val deviceId = prefs.getString("device_id", null)
-        val filterSensitive = prefs.getBoolean("filter_sensitive", false)
-
-        if (supabaseUrl.isNullOrEmpty() || supabaseAnonKey.isNullOrEmpty() || accessToken.isNullOrEmpty() || userId.isNullOrEmpty()) {
-            Log.d(TAG, "Cannot direct upload: user credentials not yet cached. WorkManager will handle later.")
-            return
-        }
-
-        var bodyToSync = body
-        if (filterSensitive && SmsSyncWorker.SENSITIVE_KEYWORDS.any { body.lowercase(Locale.ROOT).contains(it) }) {
-            bodyToSync = body.replace(Regex("\\b\\d{4,8}\\b"), "[REDACTED OTP]")
-        }
-
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }
-        val isoDate = sdf.format(Date(receivedAt))
-
-        val json = JSONObject().apply {
-            put("user_id", userId)
-            if (!deviceId.isNullOrEmpty()) put("device_id", deviceId)
-            put("sender", sender)
-            put("message_body", bodyToSync)
-            put("received_at", isoDate)
-            put("sim_slot", simSlot)
-            put("message_hash", hash)
-        }
-
-        try {
-            val url = URL("$supabaseUrl/rest/v1/sms_messages")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("apikey", supabaseAnonKey)
-                setRequestProperty("Authorization", "Bearer $accessToken")
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Prefer", "resolution=merge-duplicates")
-                doOutput = true
-                connectTimeout = 8000
-                readTimeout = 8000
-            }
-
-            OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use {
-                it.write(json.toString())
-                it.flush()
-            }
-
-            val code = conn.responseCode
-            conn.disconnect()
-
-            if (code in 200..299) {
-                Log.i(TAG, "Instant sync SUCCESS (HTTP $code) for hash $hash")
-                dbHelper.markAsSynced(hash)
-                MainActivity.notifySyncCompleted(1, 0)
-            } else {
-                Log.w(TAG, "Direct upload HTTP $code. WorkManager fallback will retry.")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Direct upload network exception", e)
         }
     }
 }
