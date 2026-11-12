@@ -11,6 +11,15 @@ WHERE older.user_id = newer.user_id
     OR (older.transaction_at = newer.transaction_at AND older.id < newer.id)
   );
 
-ALTER TABLE public.bank_transactions
-  ADD CONSTRAINT uq_bank_transactions_user_bank_reference
-  UNIQUE (user_id, bank_key, reference_number);
+DO $
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'uq_bank_transactions_user_bank_reference'
+      AND conrelid = 'public.bank_transactions'::regclass
+  ) THEN
+    ALTER TABLE public.bank_transactions
+      ADD CONSTRAINT uq_bank_transactions_user_bank_reference
+      UNIQUE (user_id, bank_key, reference_number);
+  END IF;
+END $;
