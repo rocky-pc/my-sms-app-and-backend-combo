@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/native_bridge.dart';
+import '../services/sync_service.dart';
 import 'dashboard_screen.dart';
 
 class PermissionsScreen extends StatefulWidget {
@@ -47,6 +48,12 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     setState(() {
       _smsGranted = status.isGranted;
     });
+    if (_smsGranted) {
+      // Automatically initialize 24/7 real-time background sync engine!
+      await NativeBridge.startForegroundSync();
+      await NativeBridge.catchUpRecentSms();
+      SyncService().syncNow();
+    }
     if (status.isPermanentlyDenied) {
       await openAppSettings();
     }
@@ -157,7 +164,13 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
 
                 ElevatedButton(
                   onPressed: _smsGranted
-                      ? () {
+                      ? () async {
+                          // Start instant 24/7 foreground sync & catch up any messages
+                          await NativeBridge.startForegroundSync();
+                          await NativeBridge.catchUpRecentSms();
+                          SyncService().syncNow();
+
+                          if (!context.mounted) return;
                           Navigator.of(context).pushReplacement(
                             MaterialPageRoute(
                                 builder: (_) => const DashboardScreen()),

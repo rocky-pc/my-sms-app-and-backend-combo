@@ -130,6 +130,24 @@ class NativeBridge {
     }
   }
 
+  static Future<bool> startForegroundSync() async {
+    try {
+      final bool? res = await _channel.invokeMethod('startForegroundSync');
+      return res ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  static Future<int> catchUpRecentSms() async {
+    try {
+      final int? count = await _channel.invokeMethod('catchUpRecentSms');
+      return count ?? 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
   static Future<bool> isIgnoringBatteryOptimizations() async {
     try {
       final bool? res =

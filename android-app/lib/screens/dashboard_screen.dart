@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../models/sms_model.dart';
 import '../services/auth_service.dart';
 import '../services/sync_service.dart';
+import '../services/native_bridge.dart';
 import 'settings_screen.dart';
 import 'sync_status_screen.dart';
 import 'login_screen.dart';
@@ -14,19 +15,42 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen>
+    with WidgetsBindingObserver {
   final SyncService _syncService = SyncService();
   final AuthService _auth = AuthService();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _syncService.addListener(_onStateChange);
     _syncService.refreshDashboardStats();
+
+    // Automatically trigger instant sync & catch-up in background
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await NativeBridge.startForegroundSync();
+      await NativeBridge.catchUpRecentSms();
+      if (_syncService.isOnline && _auth.isAuthenticated) {
+        _syncService.syncNow();
+      }
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Whenever user opens or switches back to app, auto-catch up!
+      NativeBridge.catchUpRecentSms();
+      if (_syncService.isOnline && _auth.isAuthenticated) {
+        _syncService.syncNow();
+      }
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _syncService.removeListener(_onStateChange);
     super.dispose();
   }

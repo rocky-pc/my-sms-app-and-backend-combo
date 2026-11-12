@@ -6,9 +6,19 @@ import android.content.Intent
 import android.os.Build
 import android.provider.Telephony
 import android.telephony.SmsMessage
-import android.telephony.SubscriptionManager
 import android.util.Log
 import androidx.work.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 class SmsReceiver : BroadcastReceiver() {
@@ -22,74 +32,179 @@ class SmsReceiver : BroadcastReceiver() {
             return
         }
 
-        try {
-            val messages: Array<SmsMessage>? = Telephony.Sms.Intents.getMessagesFromIntent(intent)
-            if (messages.isNullOrEmpty()) {
-                Log.w(TAG, "No SMS messages found in intent")
-                return
-            }
+        val pendingResult = goAsync()
 
-            // Determine SIM slot
-            val simSlot = extractSimSlot(context, intent)
-
-            // Group multipart SMS by sender
-            val groupedMessages = mutableMapOf<String, StringBuilder>()
-            var latestTimestamp = System.currentTimeMillis()
-
-            for (sms in messages) {
-                val sender = sms.displayOriginatingAddress ?: sms.originatingAddress ?: "Unknown"
-                val body = sms.displayMessageBody ?: sms.messageBody ?: ""
-                latestTimestamp = sms.timestampMillis
-
-                if (!groupedMessages.containsKey(sender)) {
-                    groupedMessages[sender] = StringBuilder()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                // 1. Robust PDU extraction
+                var messages: Array<SmsMessage>? = null
+                try {
+                    messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error in getMessagesFromIntent", e)
                 }
-                groupedMessages[sender]?.append(body)
+
+                if (messages.isNullOrEmpty()) {
+                    val bundle = intent.extras
+                    val pdus = bundle?.get("pdus") as? Array<*>
+                    val format = bundle?.getString("format")
+                    if (pdus != null) {
+                        messages = pdus.mapNotNull { pdu ->
+                            if (pdu is ByteArray) {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && format != null) {
+                                    SmsMessage.createFromPdu(pdu, format)
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    SmsMessage.createFromPdu(pdu)
+                                }
+                            } else null
+                        }.toTypedArray()
+                    }
+                }
+
+                if (messages.isNullOrEmpty()) {
+                    Log.w(TAG, "No SMS messages found in intent extras")
+                    return@launch
+                }
+
+                // 2. Extract SIM Slot
+                val simSlot = extractSimSlot(context, intent)
+
+                // 3. Assemble multipart SMS
+                val groupedMessages = mutableMapOf<String, StringBuilder>()
+                var latestTimestamp = System.currentTimeMillis()
+
+                for (sms in messages) {
+                    val sender = sms.displayOriginatingAddress ?: sms.originatingAddress ?: "Unknown"
+                    val body = sms.displayMessageBody ?: sms.messageBody ?: ""
+                    latestTimestamp = sms.timestampMillis
+
+                    if (!groupedMessages.containsKey(sender)) {
+                        groupedMessages[sender] = StringBuilder()
+                    }
+                    groupedMessages[sender]?.append(body)
+                }
+
+                val dbHelper = SmsDatabaseHelper(context)
+
+                for ((sender, bodyBuilder) in groupedMessages) {
+                    val fullBody = bodyBuilder.toString()
+                    if (fullBody.isBlank()) continue
+
+                    Log.i(TAG, "Captured incoming SMS broadcast from $sender ($simSlot)")
+
+                    // 4. Save to local SQLite
+                    dbHelper.insertMessage(
+                        sender = sender,
+                        messageBody = fullBody,
+                        receivedAt = latestTimestamp,
+                        simSlot = simSlot
+                    )
+
+                    val hash = SmsDatabaseHelper.computeHash(sender, latestTimestamp, fullBody)
+
+                    val smsMap = mapOf(
+                        "sender" to sender,
+                        "message_body" to fullBody,
+                        "received_at" to latestTimestamp,
+                        "sim_slot" to simSlot,
+                        "message_hash" to hash,
+                        "sync_status" to "PENDING"
+                    )
+
+                    // 5. Instantly notify Flutter UI if open
+                    MainActivity.notifySmsReceived(smsMap)
+
+                    // 6. Direct instant HTTPS upload to Supabase in fraction of second
+                    uploadDirect(context, sender, fullBody, latestTimestamp, simSlot, hash, dbHelper)
+                }
+
+                // 7. Enqueue WorkManager for guaranteed offline sync resilience
+                enqueueSyncWorker(context)
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error processing incoming SMS broadcast", e)
+            } finally {
+                pendingResult.finish()
+            }
+        }
+    }
+
+    private fun uploadDirect(
+        context: Context,
+        sender: String,
+        body: String,
+        receivedAt: Long,
+        simSlot: String,
+        hash: String,
+        dbHelper: SmsDatabaseHelper
+    ) {
+        val prefs = context.getSharedPreferences(SmsSyncWorker.PREFS_NAME, Context.MODE_PRIVATE)
+        val supabaseUrl = prefs.getString("supabase_url", null)
+        val supabaseAnonKey = prefs.getString("supabase_anon_key", null)
+        val accessToken = prefs.getString("access_token", null)
+        val userId = prefs.getString("user_id", null)
+        val deviceId = prefs.getString("device_id", null)
+        val filterSensitive = prefs.getBoolean("filter_sensitive", false)
+
+        if (supabaseUrl.isNullOrEmpty() || supabaseAnonKey.isNullOrEmpty() || accessToken.isNullOrEmpty() || userId.isNullOrEmpty()) {
+            return
+        }
+
+        var bodyToSync = body
+        if (filterSensitive && SmsSyncWorker.SENSITIVE_KEYWORDS.any { body.lowercase(Locale.ROOT).contains(it) }) {
+            bodyToSync = body.replace(Regex("\\b\\d{4,8}\\b"), "[REDACTED OTP]")
+        }
+
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val isoDate = sdf.format(Date(receivedAt))
+
+        val json = JSONObject().apply {
+            put("user_id", userId)
+            if (!deviceId.isNullOrEmpty()) put("device_id", deviceId)
+            put("sender", sender)
+            put("message_body", bodyToSync)
+            put("received_at", isoDate)
+            put("sim_slot", simSlot)
+            put("message_hash", hash)
+        }
+
+        try {
+            val url = URL("$supabaseUrl/rest/v1/sms_messages")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("apikey", supabaseAnonKey)
+                setRequestProperty("Authorization", "Bearer $accessToken")
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Prefer", "resolution=merge-duplicates")
+                doOutput = true
+                connectTimeout = 7000
+                readTimeout = 7000
             }
 
-            val dbHelper = SmsDatabaseHelper(context)
-
-            for ((sender, bodyBuilder) in groupedMessages) {
-                val fullBody = bodyBuilder.toString()
-                if (fullBody.isBlank()) continue
-
-                Log.d(TAG, "Captured incoming SMS from $sender ($simSlot)")
-
-                // Save to local database (PENDING status)
-                val rowId = dbHelper.insertMessage(
-                    sender = sender,
-                    messageBody = fullBody,
-                    receivedAt = latestTimestamp,
-                    simSlot = simSlot
-                )
-
-                val hash = SmsDatabaseHelper.computeHash(sender, latestTimestamp, fullBody)
-
-                val smsMap = mapOf(
-                    "sender" to sender,
-                    "message_body" to fullBody,
-                    "received_at" to latestTimestamp,
-                    "sim_slot" to simSlot,
-                    "message_hash" to hash,
-                    "sync_status" to "PENDING"
-                )
-
-                // If MainActivity is active, notify Flutter UI immediately
-                MainActivity.notifySmsReceived(smsMap)
+            OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use {
+                it.write(json.toString())
+                it.flush()
             }
 
-            // Trigger background WorkManager task to sync pending messages
-            enqueueSyncWorker(context)
+            val code = conn.responseCode
+            conn.disconnect()
 
+            if (code in 200..299) {
+                Log.i(TAG, "Instant broadcast sync SUCCESS (HTTP $code) for $hash")
+                dbHelper.markAsSynced(hash)
+                MainActivity.notifySyncCompleted(1, 0)
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Error processing incoming SMS", e)
+            Log.w(TAG, "Direct broadcast upload error (WorkManager will retry): ${e.message}")
         }
     }
 
     private fun extractSimSlot(context: Context, intent: Intent): String {
         var slotIndex = -1
 
-        // Check common extras
         if (intent.hasExtra("slot")) {
             slotIndex = intent.getIntExtra("slot", -1)
         } else if (intent.hasExtra("simSlot")) {
@@ -98,23 +213,15 @@ class SmsReceiver : BroadcastReceiver() {
             slotIndex = intent.getIntExtra("android.telephony.extra.SLOT_INDEX", -1)
         } else if (intent.hasExtra("subscription")) {
             val subId = intent.getIntExtra("subscription", -1)
-            if (subId != -1 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                try {
-                    val subManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as? SubscriptionManager
-                    if (subManager != null) {
-                        val subInfo = subManager.getActiveSubscriptionInfo(subId)
-                        if (subInfo != null) {
-                            slotIndex = subInfo.simSlotIndex
-                        }
-                    }
-                } catch (ignored: Exception) {}
+            if (subId != -1) {
+                slotIndex = subId
             }
         }
 
         return when (slotIndex) {
             0 -> "SIM 1"
             1 -> "SIM 2"
-            else -> if (slotIndex > 1) "SIM ${slotIndex + 1}" else "SIM 1"
+            else -> if (slotIndex > 1) "SIM ${slotIndex}" else "SIM 1"
         }
     }
 

@@ -37,15 +37,20 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     final auth = AuthService();
+    var emailInput = _emailController.text.trim();
+    if (emailInput.toLowerCase() == 'demo') {
+      emailInput = 'demo@mysms.app';
+    }
+
     try {
       if (_isSignUp) {
         await auth.signUp(
-          email: _emailController.text,
+          email: emailInput,
           password: _passwordController.text,
         );
       } else {
         await auth.signIn(
-          email: _emailController.text,
+          email: emailInput,
           password: _passwordController.text,
         );
       }
@@ -151,7 +156,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     keyboardType: TextInputType.emailAddress,
                     autocorrect: false,
                     decoration: InputDecoration(
-                      labelText: 'Email Address',
+                      labelText: 'Email Address or demo',
+                      hintText: 'demo or user@domain.com',
                       prefixIcon: const Icon(Icons.email_outlined),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -159,8 +165,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     validator: (val) {
                       if (val == null || val.trim().isEmpty) {
-                        return 'Please enter your email';
+                        return 'Please enter your email or demo';
                       }
+                      final clean = val.trim().toLowerCase();
+                      if (clean == 'demo') return null;
                       if (!val.contains('@') || !val.contains('.')) {
                         return 'Enter a valid email address';
                       }

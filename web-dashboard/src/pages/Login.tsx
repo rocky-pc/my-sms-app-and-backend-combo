@@ -1,31 +1,26 @@
 import React, { useState } from 'react';
-import { MessageSquare, Lock, Mail, ArrowRight, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { MessageSquare, Lock, Mail, ArrowRight, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export const Login: React.FC = () => {
-  const { signIn, signUp } = useAuth();
-  const [isSignUp, setIsSignUp] = useState(false);
+  const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setSuccessMessage(null);
     setLoading(true);
 
     try {
-      if (isSignUp) {
-        const { error } = await signUp(email, password);
-        if (error) throw error;
-        setSuccessMessage('Account created successfully! You are now logged in.');
-      } else {
-        const { error } = await signIn(email, password);
-        if (error) throw error;
+      let loginEmail = email.trim();
+      if (loginEmail.toLowerCase() === 'demo') {
+        loginEmail = 'demo@mysms.app';
       }
+      const { error } = await signIn(loginEmail, password);
+      if (error) throw error;
     } catch (err: unknown) {
       if (err instanceof Error) {
         setError(err.message);
@@ -55,47 +50,18 @@ export const Login: React.FC = () => {
 
         {/* Card */}
         <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800">
-          <div className="flex border-b border-slate-200 dark:border-slate-800 mb-6">
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(false);
-                setError(null);
-              }}
-              className={`flex-1 pb-3 text-sm font-semibold border-b-2 transition-colors ${
-                !isSignUp
-                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(true);
-                setError(null);
-              }}
-              className={`flex-1 pb-3 text-sm font-semibold border-b-2 transition-colors ${
-                isSignUp
-                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              Sign Up
-            </button>
+          <div className="mb-6">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+              Sign In to Your Dashboard
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Authorized personal access only.
+            </p>
           </div>
 
           {error && (
             <div className="mb-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-xs text-rose-600 dark:text-rose-400">
               {error}
-            </div>
-          )}
-
-          {successMessage && (
-            <div className="mb-4 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 text-xs text-emerald-600 dark:text-emerald-400 flex items-center space-x-2">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>{successMessage}</span>
             </div>
           )}
 
@@ -107,11 +73,11 @@ export const Login: React.FC = () => {
               <div className="relative">
                 <Mail className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
                 <input
-                  type="email"
+                  type="text"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@domain.com"
+                  placeholder="demo or you@domain.com"
                   className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-blue-500"
                 />
               </div>
@@ -140,7 +106,7 @@ export const Login: React.FC = () => {
               disabled={loading}
               className="w-full flex items-center justify-center space-x-2 py-3 px-4 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 active:scale-[0.99] transition-all shadow-md shadow-blue-600/30 disabled:opacity-50"
             >
-              <span>{loading ? 'Authenticating...' : isSignUp ? 'Create Personal Account' : 'Sign In'}</span>
+              <span>{loading ? 'Authenticating...' : 'Sign In'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
