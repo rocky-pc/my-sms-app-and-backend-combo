@@ -18,6 +18,13 @@ When an incoming SMS arrives on your personal Android device, the native backgro
 - **Sensitive Data Redaction**: Optional toggle to mask 4–8 digit verification codes for financial alerts and 2FA OTPs before cloud transmission.
 - **Zero Surveillance**: Does **not** read historical inbox, does **not** read outgoing SMS, and does **not** inspect other app notifications (WhatsApp, Telegram, etc.).
 
+### 💳 Bank Accounts — Indian Bank + Airtel Payments Bank
+- Detects bank-alert SMS and classifies incoming credits and outgoing debits.
+- Stores normalized transaction records in Supabase, linked to the source SMS with user-scoped RLS.
+- Shows per-account money-in, money-out, latest SMS-reported balance and a filterable ledger.
+- UPI Lite top-ups are treated as bank-account debits/transfers.
+- See [Bank Accounts documentation](./docs/BANK_ACCOUNTS.md) for setup and balance limitations.
+
 ### 💻 Web Dashboard (React + TypeScript + Vite + Tailwind CSS)
 - **Real-Time Live Updates**: Instant UI streaming via Supabase Realtime with fallback polling.
 - **KPI Metrics**: Total messages, today's messages, this week's activity, device connectivity.

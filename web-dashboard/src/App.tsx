@@ -12,6 +12,7 @@ import { AllMessages } from './pages/AllMessages';
 import { Devices } from './pages/Devices';
 import { Settings } from './pages/Settings';
 import { Security } from './pages/Security';
+import { BankAccounts } from './pages/BankAccounts';
 import type { SmsMessage, Device, SyncLog, NavTab } from './types';
 
 const MainLayout: React.FC = () => {
@@ -254,6 +255,8 @@ const MainLayout: React.FC = () => {
               onDeleteAllMessages={handleDeleteAllMessages}
             />
           )}
+
+          {activeTab === 'bank-accounts' && <BankAccounts messages={messages} />}
 
           {activeTab === 'devices' && (
             <Devices

@@ -37,4 +37,4 @@ export interface UserProfile {
   created_at: string;
 }
 
-export type NavTab = 'dashboard' | 'messages' | 'devices' | 'settings' | 'security';
+export type NavTab = 'dashboard' | 'messages' | 'bank-accounts' | 'devices' | 'settings' | 'security';

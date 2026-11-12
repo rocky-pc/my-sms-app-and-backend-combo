@@ -8,7 +8,8 @@ import {
   LogOut, 
   Sun, 
   Moon, 
-  Radio
+  Radio,
+  Wallet
 } from 'lucide-react';
 import type { NavTab } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -37,6 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = [
     { id: 'dashboard' as NavTab, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'messages' as NavTab, label: 'All Messages', icon: MessageSquare, badge: unreadCount },
+    { id: 'bank-accounts' as NavTab, label: 'Bank Accounts', icon: Wallet },
     { id: 'devices' as NavTab, label: 'Devices & Sync', icon: Smartphone },
     { id: 'settings' as NavTab, label: 'Settings', icon: Settings },
     { id: 'security' as NavTab, label: 'Security & RLS', icon: ShieldCheck },
