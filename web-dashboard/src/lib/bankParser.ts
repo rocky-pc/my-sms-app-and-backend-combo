@@ -59,7 +59,7 @@ export function parseBankMessage(message: SmsMessage): ParsedBankTransaction | n
   if (!bank || /\b(?:OTP|one.time.password)\b|do not share|never share/i.test(body)) return null;
 
   const isCredit = /credited|credit\s+to|deposited|received|added\s+to\s+(?:your\s+)?(?:a\/c|account)|refund(?:ed)?|cashback/i.test(body);
-  const isDebit = /debited|debit\s+from|withdrawn|withdrawal|spent|paid|sent\s+to|purchase|transferred\s+from/i.test(body);
+  const isDebit = /debited|debit\s+from|withdrawn|withdrawal|spent|paid|sent\s+to|\bsent\s+(?:₹|INR\s*|Rs\.?\s*)|purchase|transferred\s+from/i.test(body);
   if (isCredit === isDebit) return null;
 
   const amount = parseAmount(body);
