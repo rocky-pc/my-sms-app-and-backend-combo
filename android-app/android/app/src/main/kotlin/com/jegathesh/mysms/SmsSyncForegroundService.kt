@@ -82,7 +82,7 @@ class SmsSyncForegroundService : Service() {
         // 2. Register ContentObserver on Telephony.Sms.CONTENT_URI for instant incoming SMS capture
         try {
             val handler = Handler(Looper.getMainLooper())
-            smsObserver = object : ContentObserver(handler) {
+            val observer = object : ContentObserver(handler) {
                 override fun onChange(selfChange: Boolean, uri: Uri?) {
                     super.onChange(selfChange, uri)
                     Log.d(TAG, "SMS ContentObserver triggered: $uri")
@@ -91,10 +91,11 @@ class SmsSyncForegroundService : Service() {
                     }
                 }
             }
+            smsObserver = observer
             contentResolver.registerContentObserver(
                 Telephony.Sms.CONTENT_URI,
                 true,
-                smsObserver!!
+                observer
             )
             Log.d(TAG, "SMS ContentObserver registered on ${Telephony.Sms.CONTENT_URI}")
         } catch (e: Exception) {
@@ -126,8 +127,8 @@ class SmsSyncForegroundService : Service() {
         }
 
         try {
-            if (smsObserver != null) {
-                contentResolver.unregisterContentObserver(smsObserver!)
+            smsObserver?.let {
+                contentResolver.unregisterContentObserver(it)
                 smsObserver = null
             }
         } catch (e: Exception) {
