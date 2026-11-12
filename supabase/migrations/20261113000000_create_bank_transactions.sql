@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS public.bank_transactions (
   confidence TEXT NOT NULL DEFAULT 'medium' CHECK (confidence IN ('high', 'medium')),
   parser_version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-  CONSTRAINT uq_bank_transactions_user_sms UNIQUE (user_id, sms_message_id)
+  CONSTRAINT uq_bank_transactions_user_sms UNIQUE (user_id, sms_message_id),
+  CONSTRAINT uq_bank_transactions_user_bank_reference UNIQUE (user_id, bank_key, reference_number)
 );
 
 ALTER TABLE public.bank_transactions ENABLE ROW LEVEL SECURITY;

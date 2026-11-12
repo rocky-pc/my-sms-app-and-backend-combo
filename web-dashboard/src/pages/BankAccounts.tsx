@@ -48,10 +48,21 @@ export const BankAccounts: React.FC<Props> = ({ messages }) => {
     setError('');
     try {
       const rows = parsed.map((item) => ({ user_id: user.id, ...item, parser_version: 1 }));
-      const { error: upsertError } = await supabase
-        .from('bank_transactions')
-        .upsert(rows, { onConflict: 'user_id,sms_message_id' });
-      if (upsertError) throw upsertError;
+      const withReference = rows.filter((row) => row.reference_number);
+      const withoutReference = rows.filter((row) => !row.reference_number);
+
+      if (withReference.length) {
+        const { error: referenceError } = await supabase
+          .from('bank_transactions')
+          .upsert(withReference, { onConflict: 'user_id,bank_key,reference_number' });
+        if (referenceError) throw referenceError;
+      }
+      if (withoutReference.length) {
+        const { error: messageError } = await supabase
+          .from('bank_transactions')
+          .upsert(withoutReference, { onConflict: 'user_id,sms_message_id' });
+        if (messageError) throw messageError;
+      }
       await loadTransactions();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to update bank transactions.');

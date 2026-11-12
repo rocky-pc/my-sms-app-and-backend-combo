@@ -85,11 +85,17 @@ export function parseBankMessage(message: SmsMessage): ParsedBankTransaction | n
 }
 
 export function parseBankMessages(messages: SmsMessage[]): ParsedBankTransaction[] {
-  const seen = new Set<string>();
+  const seenMessages = new Set<string>();
+  const seenReferences = new Set<string>();
   return messages.flatMap((message) => {
     const transaction = parseBankMessage(message);
-    if (!transaction || seen.has(transaction.sms_message_id)) return [];
-    seen.add(transaction.sms_message_id);
+    if (!transaction || seenMessages.has(transaction.sms_message_id)) return [];
+    seenMessages.add(transaction.sms_message_id);
+    if (transaction.reference_number) {
+      const referenceKey = `${transaction.bank_key}:${transaction.reference_number}`;
+      if (seenReferences.has(referenceKey)) return [];
+      seenReferences.add(referenceKey);
+    }
     return [transaction];
   });
 }
