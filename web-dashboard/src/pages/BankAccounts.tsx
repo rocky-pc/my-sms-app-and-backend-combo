@@ -42,7 +42,8 @@ export const BankAccounts: React.FC<Props> = ({ messages }) => {
   }, [user]);
 
   const syncParsedTransactions = useCallback(async () => {
-    if (!user || parsed.length === 0) return;
+    if (!user) return;
+    if (parsed.length === 0) { setLoading(false); return; }
     setSyncing(true);
     setError('');
     try {

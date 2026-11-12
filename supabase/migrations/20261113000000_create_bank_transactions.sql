@@ -42,6 +42,8 @@ CREATE POLICY "Users can delete their own bank transactions" ON public.bank_tran
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.bank_transactions TO authenticated;
 
+CREATE INDEX IF NOT EXISTS idx_bank_transactions_sms_message_id
+  ON public.bank_transactions (sms_message_id);
 CREATE INDEX IF NOT EXISTS idx_bank_transactions_user_date
   ON public.bank_transactions (user_id, transaction_at DESC);
 CREATE INDEX IF NOT EXISTS idx_bank_transactions_user_bank_date
